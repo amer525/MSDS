@@ -1,0 +1,151 @@
+---
+title: "Project_2_AA_NYPD"
+author: "AA"
+date: '2023-06-25'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Introduction
+The purpose of this study is explore the NYPD Shooting Incident Data (Historic) provided by the NYPD and utilizing the data to understand if the number of shootings increased overtime as the populaion of the boroughs increased. To accomplish this, I also needed to download the NYC population table by borough from the data.gov site.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+```
+
+```{r get data}
+## Step 1: Get data
+url<- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD" # Shooting data
+url1<- "https://data.cityofnewyork.us/api/views/xywu-7bv9/rows.csv?accessType=DOWNLOAD" # Population Data
+```
+
+```{r import data, message = FALSE}
+shooting_data <- read_csv(url)
+population <- read_csv(url1)
+```
+
+
+## Cleaning and Transforming
+```{r check column values with NA}
+#To decide if a column is worth keeping
+unique(shooting_data$LOC_OF_OCCUR_DESC)
+unique(shooting_data$JURISDICTION_CODE)
+unique(shooting_data$LOCATION_DESC)
+```
+
+```{r Remove unnessecary columns and fix date column}
+shooting_data_clean <-shooting_data %>%
+  select(-c(INCIDENT_KEY,OCCUR_TIME,PRECINCT:LOC_CLASSFCTN_DESC,STATISTICAL_MURDER_FLAG,X_COORD_CD:Lon_Lat))  %>%
+  mutate(OCCUR_DATE=mdy(OCCUR_DATE))
+```
+
+```{r}
+shooting_data_clean
+```
+
+
+```{r Visualizing Data, shootings By Boro for 2010 & 2020}
+by_Boro_2010 <- shooting_data_clean %>%
+    group_by(BORO) %>%
+ filter(OCCUR_DATE > as.Date("2010-01-01"), 
+        OCCUR_DATE < as.Date("2010-12-31")) %>% 
+    summarise(cases_2010=n()) 
+
+by_Boro_2020 <- shooting_data_clean %>%
+    group_by(BORO) %>%
+ filter(OCCUR_DATE > as.Date("2020-01-01"), 
+        OCCUR_DATE < as.Date("2020-12-31")) %>% 
+    summarise(cases_2020=n()) 
+```
+
+```{r}
+by_Boro_2010
+```
+
+```{r}
+by_Boro_2020
+```
+
+
+```{r Visualizing Data, By Boro with population}
+# Sum population for non projected years
+by_Boro_w_pop <- population %>%
+  mutate(Pop_2010=`2010`,
+            .after=Borough)%>%
+  mutate(Pop_2020=`2020`,
+            .after=Pop_2010) %>%
+    mutate(Pop_2030=`2030`,
+            .after=Pop_2020) %>%
+  select(-c( `Age Group`,`1950`:`2040 - Boro share of NYC total`))  
+
+by_Boro_w_pop
+```
+
+
+```{r}
+by_Boro_w_pop$Borough = toupper(by_Boro_w_pop$Borough)
+By_Boro_totals <- merge(x = by_Boro_2010, y = by_Boro_w_pop, by.x = "BORO", by.y = "Borough")
+By_Boro_totals <- merge(x = By_Boro_totals, y = by_Boro_2020, by.x = "BORO", by.y = "BORO")
+
+By_Boro_totals
+```
+
+```{r Analyzying Data, Best and worst Boros}
+By_Boro_totals<- By_Boro_totals  %>% 
+  mutate(cases2010_per_thou=1000*cases_2010/Pop_2010)%>% 
+  mutate(cases2020_per_thou=1000*cases_2020/Pop_2020)
+
+By_Boro_totals
+```
+
+
+```{r Graph per boro cases per thou}
+By_Boro_totals %>% 
+  pivot_longer(c(cases2010_per_thou,cases2020_per_thou)) %>% 
+ggplot(aes(x = BORO, y=value, fill = name))+
+  geom_col(position = "dodge")
+```
+
+```{r}
+By_Boro_totals %>% 
+  pivot_longer(c(Pop_2010,Pop_2020)) %>% 
+ggplot(aes(x = BORO, y=value, fill = name))+
+  geom_col(position = "dodge")
+```
+
+
+## Modeling Data
+```{r}
+mod<- lm(cases_2020 ~ Pop_2020, data=By_Boro_totals)
+summary(mod)
+```
+
+```{r}
+By_Boro_totals %>% mutate(pred_2020=predict(mod))
+```
+
+```{r By Boro with predictions}
+By_Boro_totals_w_pred <-By_Boro_totals %>% mutate(pred_2020=predict(mod))
+```
+
+```{r}
+By_Boro_totals_w_pred %>% 
+  ggplot()+
+  geom_point(aes(x=Pop_2020, y=cases_2020), color = "blue")+
+  geom_point(aes(x=Pop_2020, y=pred_2020), color = "red")+
+    theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "Shooting Cases in NY Boros",y=NULL)
+
+```
+
+
+## Conclusion
+
+The data provided as part of the NYPD Shooting Incident Data (Historic) file is comprehensive and it allows for many types of analysis to be completed. I chose to look at whether shooting incidents are correlated with population sizes of the different boroughs of NYC. When comparing the number of cases, the cases per thousand, and the population sizes for 2010 and 2020; one can conclude that a direct and linear correlation does not exist. When taking a deeper look, one can expect that other factors are at play that influence the number of shootings. 2020 was also the beginning of the pandemic and life was different around that time, most people stayed home and avoided contact with others outside of their households. That's one source of bias, the dataset for 2020 could be an outlier when compared to prior years. A personal bias of mine is the limited knowledge of the different boroughs in NYC, most of which is from movies and social media. I had some assumptions about which boroughs could be more troublesome, and it could have lead to mistakes in the analysis. 
+
+
